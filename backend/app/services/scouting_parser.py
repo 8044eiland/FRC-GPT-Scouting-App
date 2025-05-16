@@ -20,6 +20,9 @@ def parse_scouting_row(row: List[str], headers: List[str]) -> Dict[str, Any]:
     # Get schema mapping
     schema_data = get_match_mapping()
     scouting_data = {}
+    
+    # Store the original header values in the field_types mapping
+    field_types = {}
 
     # Handle multiple possible formats of schema data
     match_mapping = {}
@@ -40,31 +43,16 @@ def parse_scouting_row(row: List[str], headers: List[str]) -> Dict[str, Any]:
     if "Qual Number" not in match_mapping:
         match_mapping["Qual Number"] = "match_number"
 
+    # Process every header in the row, preserving all data including non-critical fields
     for header in headers:
-        if header not in match_mapping:
-            # Try case-insensitive match
-            matching_key = next((k for k in match_mapping.keys() if k.lower() == header.lower()), None)
-            if matching_key:
-                header = matching_key
-            else:
-                # Handle common field names
-                if "team" in header.lower() and "number" in header.lower():
-                    match_mapping[header] = "team_number"
-                elif ("match" in header.lower() or "qual" in header.lower()) and "number" in header.lower():
-                    match_mapping[header] = "match_number"
-                else:
-                    # print(f"Header '{header}' not found in mapping")
-                    continue
-
-        mapped_field = match_mapping.get(header, "ignore")
-        if mapped_field == "ignore":
-            # print(f"Header '{header}' mapped to 'ignore'")
-            continue
-
         try:
             index = headers.index(header)
             value = row[index] if index < len(row) else None
             
+            # Skip empty values
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                continue
+                
             # Try to convert numeric values to integers or floats
             if value is not None and isinstance(value, str):
                 value = value.strip()
@@ -79,17 +67,52 @@ def parse_scouting_row(row: List[str], headers: List[str]) -> Dict[str, Any]:
                     # Keep as string if conversion fails
                     pass
             
-            scouting_data[mapped_field] = value
+            # Store the original header with normalization for standard field name
+            field_key = header.replace(" ", "_").lower()
             
-            # Special case for "qual_number" -> also store as "match_number" for compatibility
-            if mapped_field == "qual_number" and "match_number" not in scouting_data:
-                scouting_data["match_number"] = value
-            # Special case for "match_number" -> also store as "qual_number" for compatibility
-            elif mapped_field == "match_number" and "qual_number" not in scouting_data:
-                scouting_data["qual_number"] = value
+            # Determine the mapped field category
+            mapped_field = None
+            if header in match_mapping:
+                mapped_field = match_mapping[header]
+            else:
+                # Try case-insensitive match
+                matching_key = next((k for k in match_mapping.keys() if k.lower() == header.lower()), None)
+                if matching_key:
+                    mapped_field = match_mapping[matching_key]
+                else:
+                    # Handle common field names
+                    if "team" in header.lower() and "number" in header.lower():
+                        mapped_field = "team_number"
+                    elif ("match" in header.lower() or "qual" in header.lower()) and "number" in header.lower():
+                        mapped_field = "match_number"
+            
+            # Skip "ignore" mapped fields
+            if mapped_field == "ignore":
+                continue
+                
+            # Store the field value using the original header name as key
+            scouting_data[field_key] = value
+            
+            # Also store mapped field for compatibility with existing code
+            if mapped_field:
+                # Store the mapping category for this field
+                field_types[field_key] = mapped_field
+                
+                # Also store the value under the standard field name
+                scouting_data[mapped_field] = value
+                
+                # Special case for "qual_number" -> also store as "match_number" for compatibility
+                if mapped_field == "qual_number" and "match_number" not in scouting_data:
+                    scouting_data["match_number"] = value
+                # Special case for "match_number" -> also store as "qual_number" for compatibility
+                elif mapped_field == "match_number" and "qual_number" not in scouting_data:
+                    scouting_data["qual_number"] = value
                 
         except ValueError:
             continue
+
+    # Store the field type mappings
+    scouting_data["field_types"] = field_types
 
     # Only return entries that have a valid team_number
     team_number = scouting_data.get("team_number")

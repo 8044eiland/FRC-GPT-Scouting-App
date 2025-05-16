@@ -1,0 +1,7 @@
+2025-05-14 13:01:41,168 - migration - INFO - Starting migration for database: /mnt/c/Users/frc80/OneDrive/Documents/FRC-GPT-Scouting-App/backend/data/scouting_app.db
+2025-05-14 13:01:41,169 - migration - INFO - Connecting to database
+2025-05-14 13:01:41,180 - migration - INFO - Adding 'excluded_teams' column to locked_picklists table
+2025-05-14 13:01:41,190 - migration - INFO - Adding 'strategy_prompts' column to locked_picklists table
+2025-05-14 13:01:41,218 - migration - INFO - Updating existing records with default values
+2025-05-14 13:01:41,243 - migration - INFO - Updated 1 existing records with default values
+2025-05-14 13:01:41,246 - migration - INFO - Migration completed successfully

@@ -388,6 +388,13 @@ async def build_unified_dataset(
                 (r for r in event_rankings.get("rankings", []) if r.get("team_key") == team_key), 
                 {}
             ) if event_rankings else {}
+            
+            # Collect all fields from scouting data to ensure we preserve all mappings
+            team_field_mappings = {}
+            for record in team_scouting:
+                if "field_types" in record:
+                    # Merge all field type mappings from each record
+                    team_field_mappings.update(record.get("field_types", {}))
     
             unified_data[str(team_number)] = {
                 "team_number": team_number,
@@ -396,7 +403,8 @@ async def build_unified_dataset(
                 "superscouting_data": team_superscouting,
                 "tba_info": team,
                 "statbotics_info": team_statbotics,
-                "ranking_info": team_ranking
+                "ranking_info": team_ranking,
+                "field_mappings": team_field_mappings  # Store field mappings for later reference
             }
 
     # 6. Save unified data locally
@@ -409,7 +417,9 @@ async def build_unified_dataset(
     # Extract all scouting data for top-level structure for validation
     all_scouting_records = []
     for team_number, team_data in unified_data.items():
+        # Get all scouting records, preserving all fields
         for record in team_data.get("scouting_data", []):
+            # Make sure all fields are present - do not filter or modify
             all_scouting_records.append(record)
 
     # Extract all matches from unified data
@@ -432,6 +442,31 @@ async def build_unified_dataset(
     print(f"\U0001F535 Extracted {len(all_scouting_records)} scouting records for validation")
     print(f"\U0001F535 Extracted {len(all_matches)} unique matches for validation")
 
+    # Extract all field types used across the dataset
+    all_field_types = set()
+    field_count = 0
+    
+    # Diagnostic to check field preservation
+    sample_record = None
+    if all_scouting_records and len(all_scouting_records) > 0:
+        sample_record = all_scouting_records[0]
+        print(f"\U0001F535 Sample scouting record has {len(sample_record)} fields")
+        print(f"\U0001F535 Sample fields: {list(sample_record.keys())[:10]}...")
+        
+        if "field_types" in sample_record:
+            print(f"\U0001F535 Field types present! Found {len(sample_record['field_types'])} mapped fields")
+        else:
+            print(f"\U0001F534 WARNING: field_types missing from sample record")
+    
+    for team_data in unified_data.values():
+        if "field_mappings" in team_data:
+            mappings = team_data["field_mappings"]
+            all_field_types.update(mappings.values())
+            field_count += len(mappings)
+    
+    print(f"\U0001F535 Found {len(all_field_types)} unique field types across {field_count} total field mappings")
+    print(f"\U0001F535 Field types: {sorted(list(all_field_types))}")
+            
     output_payload = {
         "event_key": event_key,
         "year": year,
@@ -440,6 +475,7 @@ async def build_unified_dataset(
         "metadata": {
             "scouting_headers": headers,
             "superscouting_headers": superscouting_headers,
+            "all_field_types": list(all_field_types),
             "created_timestamp": __import__('datetime').datetime.now().isoformat(),
         },
         # Add top-level matches and scouting arrays for validation

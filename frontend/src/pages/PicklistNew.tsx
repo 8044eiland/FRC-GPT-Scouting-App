@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import PicklistGenerator from '../components/PicklistGenerator';
+import TeamComparisonModal from '../components/TeamComparisonModal';
 
 // Type definitions
 interface Team {
@@ -81,7 +82,10 @@ const PicklistNew: React.FC = () => {
   });
   
   // State for natural language prompt
-  const [strategyPrompt, setStrategyPrompt] = useState<string>('');
+  const [strategyPrompt, setStrategyPrompt] = useState<string>(() => {
+    const saved = localStorage.getItem('strategyPrompt');
+    return saved ? saved : '';
+  });
   const [parsedPriorities, setParsedPriorities] = useState<ParsedStrategy | null>(null);
   const [isParsingStrategy, setIsParsingStrategy] = useState<boolean>(false);
   
@@ -99,6 +103,18 @@ const PicklistNew: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
   const [isGeneratingRankings, setIsGeneratingRankings] = useState<boolean>(false);
+  
+  // State for team comparison
+  const [selectedTeams, setSelectedTeams] = useState<number[]>([]);
+  const [showComparisonModal, setShowComparisonModal] = useState<boolean>(false);
+  const [comparisonTeam1, setComparisonTeam1] = useState<Team | null>(null);
+  const [comparisonTeam2, setComparisonTeam2] = useState<Team | null>(null);
+  
+  // State for semantic batching
+  const [useSemanticBatching, setUseSemanticBatching] = useState<boolean>(() => {
+    const saved = localStorage.getItem('useSemanticBatching');
+    return saved ? saved === 'true' : true; // Default to true for better results
+  });
   // Initialize shouldShowGenerator based on whether rankings exist for the current tab
   const [shouldShowGenerator, setShouldShowGenerator] = useState<boolean>(() => {
     // Check localStorage for existing rankings
@@ -151,6 +167,11 @@ const PicklistNew: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('thirdPickRankings', JSON.stringify(thirdPickRankings));
   }, [thirdPickRankings]);
+  
+  // Save strategy prompt to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('strategyPrompt', strategyPrompt);
+  }, [strategyPrompt]);
   
   // State for loading, error, success
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -711,11 +732,13 @@ const PicklistNew: React.FC = () => {
           your_team_number: yourTeamNumber,
           pick_position: activeTab,
           priorities: simplePriorities,
+          strategy_prompt: strategyPrompt, // Include the strategy prompt
           exclude_teams: teamsToExclude,
           use_batching: true,
           batch_size: 20,
           reference_teams_count: 3,
-          reference_selection: "top_middle_bottom"
+          reference_selection: "top_middle_bottom",
+          use_semantic_batching: useSemanticBatching // Use the state value
         })
       });
 
@@ -1218,6 +1241,78 @@ const PicklistNew: React.FC = () => {
     if (activeTab === 'first') return firstPickPriorities;
     if (activeTab === 'second') return secondPickPriorities;
     return thirdPickPriorities;
+  };
+  
+  // Handle team selection for comparison
+  const handleTeamSelect = (teamNumber: number) => {
+    setSelectedTeams(prev => {
+      // If team is already selected, remove it
+      if (prev.includes(teamNumber)) {
+        return prev.filter(num => num !== teamNumber);
+      }
+      
+      // If we already have 2 teams selected, replace the oldest one
+      if (prev.length >= 2) {
+        return [prev[1], teamNumber];
+      }
+      
+      // Otherwise, add the team
+      return [...prev, teamNumber];
+    });
+  };
+  
+  // Get the current active rankings based on tab
+  const getActiveRankings = (): Team[] => {
+    if (activeTab === 'first') return firstPickRankings;
+    if (activeTab === 'second') return secondPickRankings;
+    return thirdPickRankings;
+  };
+  
+  // Open the comparison modal when compare button is clicked
+  const handleCompareTeams = () => {
+    if (selectedTeams.length !== 2) return;
+    
+    const rankings = getActiveRankings();
+    const team1 = rankings.find(team => team.team_number === selectedTeams[0]) || null;
+    const team2 = rankings.find(team => team.team_number === selectedTeams[1]) || null;
+    
+    if (team1 && team2) {
+      setComparisonTeam1(team1);
+      setComparisonTeam2(team2);
+      setShowComparisonModal(true);
+    } else {
+      setError('Could not find both selected teams in the current rankings');
+    }
+  };
+  
+  // Swap the positions of the two teams being compared in the picklist rankings
+  const handleSwapComparisonTeams = () => {
+    if (comparisonTeam1 && comparisonTeam2) {
+      const rankings = getActiveRankings();
+      const index1 = rankings.findIndex(team => team.team_number === comparisonTeam1?.team_number);
+      const index2 = rankings.findIndex(team => team.team_number === comparisonTeam2?.team_number);
+      
+      // If both teams are found in the rankings, swap them regardless of position
+      if (index1 !== -1 && index2 !== -1) {
+        const newRankings = [...rankings];
+        [newRankings[index1], newRankings[index2]] = [newRankings[index2], newRankings[index1]];
+        
+        // Update the appropriate rankings state
+        if (activeTab === 'first') {
+          setFirstPickRankings(newRankings);
+        } else if (activeTab === 'second') {
+          setSecondPickRankings(newRankings);
+        } else {
+          setThirdPickRankings(newRankings);
+        }
+        
+        // Show feedback and close the comparison modal
+        setSuccessMessage(`Swapped teams ${comparisonTeam1.team_number} and ${comparisonTeam2.team_number} in rankings`);
+        setShowComparisonModal(false);
+      } else {
+        setError('Could not locate one or both teams in the current rankings');
+      }
+    }
   };
   
   // Show confirmation dialog before clearing data
@@ -1905,7 +2000,25 @@ const PicklistNew: React.FC = () => {
                 )}
               </div>
               
-              <div className="mt-6 flex justify-end">
+              <div className="mt-6 flex justify-between items-center">
+                <div className="flex items-center bg-blue-50 px-3 py-2 rounded-lg border border-blue-200">
+                  <input
+                    type="checkbox"
+                    id="semanticBatching"
+                    checked={useSemanticBatching}
+                    onChange={(e) => {
+                      setUseSemanticBatching(e.target.checked);
+                      localStorage.setItem('useSemanticBatching', e.target.checked.toString());
+                    }}
+                    className="h-4 w-4 text-blue-600 rounded mr-2"
+                  />
+                  <label htmlFor="semanticBatching" className="text-sm text-blue-700 font-medium flex items-center">
+                    Smart Team Batching 
+                    <span className="ml-1 text-blue-500 text-xs cursor-help inline-block" title="Groups similar teams for more consistent rankings">
+                      ℹ️
+                    </span>
+                  </label>
+                </div>
                 <button
                   onClick={generateRankings}
                   disabled={getActivePriorities().length === 0 || isGeneratingRankings}
@@ -1921,6 +2034,23 @@ const PicklistNew: React.FC = () => {
                 <h2 className="text-xl font-bold">Picklist</h2>
                 
                 <div className="flex space-x-3">
+                  {/* Team comparison button - only enabled when 2 teams are selected */}
+                  <button
+                    onClick={handleCompareTeams}
+                    disabled={selectedTeams.length !== 2}
+                    className={`px-4 py-2 rounded font-medium flex items-center ${
+                      selectedTeams.length === 2
+                        ? 'bg-green-600 text-white hover:bg-green-700'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                    title={selectedTeams.length === 2 ? 'Compare selected teams' : 'Select exactly 2 teams to compare'}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    Compare Teams {selectedTeams.length > 0 ? `(${selectedTeams.length}/2)` : ''}
+                  </button>
+                  
                   {/* Lock/Unlock Picklist button */}
                   {(firstPickRankings.length > 0 && secondPickRankings.length > 0) && !hasLockedPicklist && (
                     <button
@@ -2115,31 +2245,107 @@ const PicklistNew: React.FC = () => {
                     </div>
                   )}
                 
-                  <PicklistGenerator
+                  {/* Custom team display with checkboxes */}
+                  <div className="mb-4">
+                    <h3 className="text-lg font-bold mb-3">Team Rankings</h3>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th scope="col" className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Select
+                            </th>
+                            <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Rank
+                            </th>
+                            <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Team
+                            </th>
+                            <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Score
+                            </th>
+                            <th scope="col" className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Key Metrics
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {(activeTab === 'first' ? firstPickRankings : 
+                            activeTab === 'second' ? secondPickRankings : 
+                            thirdPickRankings).map((team, index) => (
+                            <tr 
+                              key={team.team_number}
+                              className={selectedTeams.includes(team.team_number) ? 'bg-green-50' : 'hover:bg-gray-50'}
+                            >
+                              <td className="px-2 py-4 whitespace-nowrap">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedTeams.includes(team.team_number)}
+                                  onChange={() => handleTeamSelect(team.team_number)}
+                                  className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                  disabled={hasLockedPicklist}
+                                />
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap">
+                                <div className="text-sm font-medium text-gray-900">{index + 1}</div>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div>
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {team.team_number}
+                                    </div>
+                                    <div className="text-sm text-gray-500">
+                                      {team.nickname || `Team ${team.team_number}`}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900 font-medium">
+                                  {team.score?.toFixed(2) || 'N/A'}
+                                </div>
+                              </td>
+                              <td className="px-3 py-4">
+                                <div className="text-sm text-gray-900">
+                                  {team.metrics_contribution?.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {team.metrics_contribution.slice(0, 3).map((metric) => (
+                                        <span 
+                                          key={metric.id} 
+                                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                                          title={`Contribution: ${metric.weighted_value.toFixed(2)}`}
+                                        >
+                                          {getMetricLabel(metric.id)}
+                                        </span>
+                                      ))}
+                                      {team.metrics_contribution.length > 3 && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                          +{team.metrics_contribution.length - 3} more
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-500 italic">No metrics data</span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  
+                  {/* Include the TeamComparisonModal */}
+                  <TeamComparisonModal
+                    isOpen={showComparisonModal}
+                    onClose={() => setShowComparisonModal(false)}
+                    team1={comparisonTeam1}
+                    team2={comparisonTeam2}
                     datasetPath={datasetPath}
-                    yourTeamNumber={yourTeamNumber}
-                    pickPosition={activeTab}
+                    onSwapTeams={handleSwapComparisonTeams}
                     priorities={getActivePriorities()}
-                    excludeTeams={excludedTeams}
-                    onPicklistGenerated={handlePicklistGenerated}
-                    onExcludeTeam={handleExcludeTeam}
-                    isLocked={hasLockedPicklist}
-                    // Create a stable key that doesn't change when navigating and returning
-                    // Only change the key when actually switching tabs or when exclusions change
-                    // Include a fixed timestamp based on the current rankings' existence
-                    key={`picklist-${activeTab}-${
-                      JSON.stringify(excludedTeams)
-                    }-${activeTab === 'first' ? 
-                        (firstPickRankings.length > 0 ? 'has-rankings' : 'no-rankings') : 
-                      activeTab === 'second' ? 
-                        (secondPickRankings.length > 0 ? 'has-rankings' : 'no-rankings') : 
-                        (thirdPickRankings.length > 0 ? 'has-rankings' : 'no-rankings')
-                    }`}
-                    initialPicklist={
-                      activeTab === 'first' ? firstPickRankings :
-                      activeTab === 'second' ? secondPickRankings :
-                      thirdPickRankings
-                    }
                   />
                 </>
               ) : (

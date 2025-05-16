@@ -9,7 +9,20 @@ from fastapi import UploadFile
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 import httpx
+import logging
 from app.services.global_cache import cache
+from app.services.embedding_service import process_manual, get_chunks_by_query
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("manual_parser.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('manual_parser')
 
 load_dotenv()
 
@@ -54,13 +67,15 @@ async def fetch_pdf_from_url(url: str) -> Optional[bytes]:
         print(f"Error downloading PDF: {e}")
         return None
 
-async def extract_manual_text(manual_file: Optional[UploadFile] = None, manual_url: Optional[str] = None) -> Optional[str]:
+async def extract_manual_text(manual_file: Optional[UploadFile] = None, manual_url: Optional[str] = None, year: int = 2025, use_embeddings: bool = True) -> Optional[str]:
     """
     Extract text from either an uploaded PDF file or a PDF URL.
     
     Args:
         manual_file: Optional uploaded PDF file
         manual_url: Optional URL to a PDF file
+        year: FRC season year
+        use_embeddings: Whether to process for vector embeddings
         
     Returns:
         Optional[str]: Extracted text or None if extraction fails
@@ -68,18 +83,69 @@ async def extract_manual_text(manual_file: Optional[UploadFile] = None, manual_u
     if manual_file:
         content = await manual_file.read()
         text = await extract_text_from_pdf(content)
+        # If it's a file upload, we need to save it somewhere to get a URL for embeddings
+        # For simplicity, we'll skip embeddings processing for file uploads in this version
+        use_embeddings = False
     elif manual_url:
         pdf_content = await fetch_pdf_from_url(manual_url)
         if not pdf_content:
             return None
         text = await extract_text_from_pdf(pdf_content)
+        
+        # Process for embeddings if requested
+        if use_embeddings:
+            logger.info(f"Processing manual for embeddings: {manual_url}, year={year}")
+            try:
+                result = await process_manual(manual_url, year)
+                if result["status"] == "success":
+                    logger.info(f"Successfully processed manual embeddings: {result['chunk_count']} chunks")
+                    # Store the manual ID for future reference
+                    cache["manual_embeddings"] = {
+                        "manual_id": result["manual_id"],
+                        "year": year,
+                        "url": manual_url
+                    }
+                else:
+                    logger.error(f"Failed to process manual embeddings: {result['message']}")
+            except Exception as e:
+                logger.error(f"Error processing manual embeddings: {e}")
     else:
         return None
     
     # Save to global cache
     cache["manual_text"] = text
+    cache["manual_year"] = year
     
     return text
+
+async def search_manual(query: str, year: Optional[int] = None, top_k: int = 5) -> List[Dict[str, Any]]:
+    """
+    Search the game manual for relevant sections based on a query.
+    
+    Args:
+        query: The search query
+        year: FRC season year (defaults to cached year if available)
+        top_k: Number of top results to return
+        
+    Returns:
+        List of relevant chunks with their text and metadata
+    """
+    # Get year from cache if not provided
+    if year is None:
+        year = cache.get("manual_year", 2025)
+    
+    # Log the search query
+    logger.info(f"Searching manual for '{query}' (year={year})")
+    
+    # Perform the search
+    results = await get_chunks_by_query(query, year, top_k)
+    
+    if not results:
+        logger.warning(f"No results found for query: '{query}'")
+    else:
+        logger.info(f"Found {len(results)} results for query: '{query}'")
+    
+    return results
 
 async def extract_game_relevant_sections(manual_text: str, year: int) -> Dict[str, Any]:
     """

@@ -64,6 +64,7 @@ interface PicklistGeneratorProps {
   yourTeamNumber: number;
   pickPosition: 'first' | 'second' | 'third';
   priorities: MetricPriority[];
+  strategyPrompt?: string; // Add strategy prompt prop
   excludeTeams?: number[];
   onPicklistGenerated?: (result: PicklistResult) => void;
   initialPicklist?: Team[]; // Add prop for initial picklist data
@@ -211,6 +212,7 @@ const PicklistGenerator: React.FC<PicklistGeneratorProps> = ({
   yourTeamNumber,
   pickPosition,
   priorities,
+  strategyPrompt = "",
   excludeTeams = [],
   onPicklistGenerated,
   initialPicklist = [],
@@ -224,6 +226,7 @@ const PicklistGenerator: React.FC<PicklistGeneratorProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [showAnalysis, setShowAnalysis] = useState<boolean>(false);
+  const [useSemanticBatching, setUseSemanticBatching] = useState<boolean>(true);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
   // Missing teams state
@@ -482,11 +485,13 @@ const PicklistGenerator: React.FC<PicklistGeneratorProps> = ({
         your_team_number: yourTeamNumber,
         pick_position: pickPosition,
         priorities: simplePriorities,
+        strategy_prompt: strategyPrompt,  // Include strategy prompt if provided
         exclude_teams: teamsToExclude,
         use_batching: true,  // Enable batch processing by default
         batch_size: 20,
         reference_teams_count: 3,
-        reference_selection: "top_middle_bottom"
+        reference_selection: "top_middle_bottom",
+        use_semantic_batching: useSemanticBatching  // Use the semantic batching state
       });
       
       console.log('Sending request:', requestBody);
@@ -842,13 +847,30 @@ const PicklistGenerator: React.FC<PicklistGeneratorProps> = ({
                 {showAnalysis ? 'Hide Analysis' : 'Show Analysis'}
               </button>
               {!isLocked && (
-                <button
-                  onClick={generatePicklist}
-                  disabled={isLoading}
-                  className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-green-300"
-                >
-                  {isLoading ? 'Regenerating...' : 'Regenerate Picklist'}
-                </button>
+                <div className="flex items-center space-x-2">
+                  <div className="flex items-center mr-2 px-2 py-1 border border-blue-300 rounded bg-blue-50">
+                    <input
+                      type="checkbox"
+                      id="semanticBatching"
+                      checked={useSemanticBatching}
+                      onChange={(e) => setUseSemanticBatching(e.target.checked)}
+                      className="mr-1 h-4 w-4 text-blue-600 rounded"
+                    />
+                    <label htmlFor="semanticBatching" className="text-sm text-blue-700 font-semibold">
+                      Smart Batching
+                    </label>
+                    <span className="ml-1 text-blue-500 text-xs cursor-help" title="Groups similar teams for more consistent rankings">
+                      ℹ️
+                    </span>
+                  </div>
+                  <button
+                    onClick={generatePicklist}
+                    disabled={isLoading}
+                    className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-green-300"
+                  >
+                    {isLoading ? 'Regenerating...' : 'Regenerate Picklist'}
+                  </button>
+                </div>
               )}
             </>
           )}

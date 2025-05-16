@@ -46,6 +46,8 @@ from app.api import debug_logs              # Import debug logs API
 from app.api import alliance_selection      # Import alliance selection API
 from app.api import archive                 # Import event archiving API
 from app.api import sheet_config            # Import sheet configuration API
+from app.api import picklist_comparison     # Import picklist comparison API
+from app.api import manual_search           # Import manual search API
 
 app = FastAPI(title="FRC Scouting Assistant", version="0.1.0")
 
@@ -98,7 +100,9 @@ app.include_router(progress.router, prefix="/api")  # Add the progress tracking 
 app.include_router(debug_logs.router, prefix="/api/debug")  # Add the debug logs API
 app.include_router(alliance_selection.router)  # Add the alliance selection API
 app.include_router(archive.router)  # Add the event archiving API
+app.include_router(picklist_comparison.router)  # Add the picklist comparison API
 app.include_router(sheet_config.router)  # Sheet configuration API already has prefix
+app.include_router(manual_search.router)  # Add the manual search API
 
 @app.get("/")
 async def root():
